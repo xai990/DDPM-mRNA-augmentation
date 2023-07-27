@@ -15,7 +15,7 @@ cd DDPM-mRNA-augmentation
 # create conda environment called "DDPM"
 conda env create -f environment.yml
 
-# run TSPG on breast cancer data  -- make sure the scripts are running on a computed node (an interactive job includes at least one gpu)
+# run DDPM on breast cancer data  -- make sure the scripts are running on a computed node (an interactive job includes at least one gpu)
 python scripts/main.py
 
 ```
