@@ -1,0 +1,19 @@
+# This file is to create a conda environment for Diffusion module 
+# To create the environment with :
+# conda env create -f environment.yml
+
+name: DDIM
+channels:
+  - defaults
+dependencies:
+  - matplotlib
+  - numpy
+  - pandas
+  - pip
+  - python
+  - scikit-learn
+  - pip:
+    - torch
+    - torchvision
+    - torchaudio
+    - umap-learn
