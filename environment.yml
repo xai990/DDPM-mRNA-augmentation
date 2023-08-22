@@ -2,7 +2,7 @@
 # To create the environment with :
 # conda env create -f environment.yml
 
-name: DDIM
+name: DDPM
 channels:
   - defaults
 dependencies:
