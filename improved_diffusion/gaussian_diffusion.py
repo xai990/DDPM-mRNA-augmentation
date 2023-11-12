@@ -7,13 +7,16 @@ Docstrings have been added, as well as DDIM sampling and a new collection of bet
 
 import enum
 import math
-
+from typing import Tuple, Optional
 import numpy as np
 import torch as th
-
+import torch.nn as nn 
 from .nn import mean_flat
 from .losses import normal_kl, discretized_gaussian_log_likelihood
+from .train_util import gather 
+import torch.nn.functional as F
 
+from . import logger 
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
     """
@@ -835,7 +838,113 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
                             dimension equal to the length of timesteps.
     :return: a tensor of shape [batch_size, 1, ...] where the shape has K dims.
     """
-    res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
+    if isinstance(arr, np.ndarray):
+        res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
+    res = arr[timesteps]
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
     return res.expand(broadcast_shape)
+
+
+
+
+class DenoiseDiffusion(nn.Module):
+
+    def __init__(self,
+                model: nn.Module,
+                n_steps: int,
+                device:th.device):
+        super().__init__()
+        #self.beta = th.linspace(1e-4,0.02,n_steps).to(device)
+        self.beta = th.linspace(1e-5,0.002,n_steps).to(device) # change beta to a smaller value
+        self.alpha = 1 - self.beta
+        self.alpha_bar = th.cumprod(self.alpha,dim=0)
+        self.model = model
+        self.sigma2 = self.beta # sigma 2 == beta has the same performance
+        self.n_steps = n_steps
+
+
+    # def q_xt_x0(self, x0, t):
+    #     mean = gather(self.alpha_bar,t) ** 0.5 * x0
+    #     var = 1 - gather(self.alpha_bar,t)
+    #     return mean, var
+
+    def q_xt_x0(self, x0, t):
+        mean = _extract_into_tensor(self.alpha_bar, t, x0.shape) ** 0.5 *x0
+        var = 1 - _extract_into_tensor(self.alpha_bar,t, x0.shape)
+        return mean, var
+
+
+
+
+    def q_sample(self, x0:th.Tensor, t: th.Tensor, eps: Optional[th.Tensor] = None):
+
+        if eps == None:
+            eps = th.randn_like(x0)
+
+        mean, var = self.q_xt_x0(x0,t)
+        #mean_e, var_e = self.q_xt_x0_extract(x0,t)
+        #assert th.equal(mean, mean_e),"the mean is not equal"
+        return  mean + var ** 0.5 * eps
+
+
+    def p_sample(self, xt:th.Tensor, t:th.Tensor):
+
+        alpha_bar = gather(self.alpha_bar, t)
+        alpha = gather(self.alpha, t)
+        beta = gather(self.beta, t)
+        # eps theta
+        eps_theta = self.model(xt,t)
+        # coeff for eps
+        eps_coef = beta / (1-alpha_bar) ** .5
+        # mean
+        mean =  1 / (alpha ** .5) * ( xt - eps_coef * eps_theta)
+        # variation
+        var = beta
+        # random generate noise
+        eps = th.randn(xt.shape, device=xt.device)
+        return mean + (var ** .5) * eps
+
+    def loss(self, x0:th.Tensor, noise:Optional[th.Tensor]=None):
+
+        batch_size = x0.shape[0]
+        t = th.randint(0,self.n_steps, (batch_size,), device=x0.device,dtype=th.long)
+        logger.debug(f"The size of t at the loss function is:{t.size()}  -- from gaussian_diffusion" )
+        # print("t size is:",t.size())
+        if noise == None:
+            noise = th.randn_like(x0)
+
+        xt = self.q_sample(x0, t, eps = noise) # (batch_size, channels, rows, cols)
+        #logger.debug(f"The forward xt is: {xt}")
+        logger.debug(f"The size of xt is: {xt.size()} -- from gaussian_diffusion")
+        # print("xt size is:", xt.size())
+        #t = t.unsqueeze(-1).unsqueeze(-1) # (batch_size, nums) -> (batch_size, channels, rows, nums)
+        #logger.debug(f"The size of t is: {t.size()}")
+        eps_theta = self.model(xt,t)
+        return F.mse_loss(noise, eps_theta)
+
+
+    def plotumap(self,x0, noise:Optional[th.Tensor]=None, num_shows:Optional[int]=20, cols:Optional[int]=10) -> None:
+        # compute embedding of merge data
+        reducer = umap.UMAP()
+
+        # initialize figure
+        rows = num_shows//cols
+        #print("The type of row is:",type(rows))
+        fig,axs = plt.subplots(rows,cols,figsize=(28,3))
+        plt.rc('text', color = 'black') # add text to the plot
+
+        for i in range(num_shows):
+            j = i //cols # plot col index
+            k = i % cols # plot row index
+            # generate q_sample
+            t = th.full((x0.shape[0],),i*self.n_steps//num_shows)
+            xt = self.q_sample(x0,t)
+            # apply umap embedding
+            qi = reducer.fit_transform(xt[:,0,0,:]) # data type: tuple
+            axs[j,k].scatter(qi[:,0],qi[:,1], color='red',edgecolor='white')
+            axs[j,k].set_axis_off()
+            axs[j,k].set_title('$q(\mathbf{x}_{'+str(i*self.n_steps//num_shows)+'})$')
+
+        plt.savefig("foward.umap.png")
+        plt.close()

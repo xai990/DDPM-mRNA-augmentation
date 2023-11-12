@@ -7,7 +7,6 @@ import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .fp16_util import convert_module_to_f16, convert_module_to_f32
 from .nn import (
     SiLU,
     conv_nd,
@@ -19,6 +18,7 @@ from .nn import (
     checkpoint,
 )
 
+from . import logger
 
 class TimestepBlock(nn.Module):
     """
@@ -182,8 +182,12 @@ class ResBlock(TimestepBlock):
         )
 
     def _forward(self, x, emb):
+        #logger.debug(f"forward x: {x.size()} -- from unet")
         h = self.in_layers(x)
+        #logger.debug(f"forward h: {h.size()} -- from unet")
+        #logger.debug(f"The structure of in layer: {self.in_layers} -- from unet")
         emb_out = self.emb_layers(emb).type(h.dtype)
+        #logger.debug(f"The structure of emb layer: {self.emb_layers}")
         while len(emb_out.shape) < len(h.shape):
             emb_out = emb_out[..., None]
         if self.use_scale_shift_norm:
@@ -192,6 +196,10 @@ class ResBlock(TimestepBlock):
             h = out_norm(h) * (1 + scale) + shift
             h = out_rest(h)
         else:
+            # print("The size of h:",h.size())
+            # print("The size of emb:", emb_out.size())
+            #logger.debug(f"h:{h.size()}")
+            #logger.debug(f"emb_out:{emb_out.size()}")
             h = h + emb_out
             h = self.out_layers(h)
         return self.skip_connection(x) + h
@@ -306,7 +314,8 @@ class UNetModel(nn.Module):
         num_res_blocks,
         attention_resolutions,
         dropout=0,
-        channel_mult=(1, 2, 4, 8),
+        #channel_mult=(1, 2, 4, 8),
+        channel_mult=(1, 2),
         conv_resample=True,
         dims=2,
         num_classes=None,
@@ -436,21 +445,6 @@ class UNetModel(nn.Module):
             zero_module(conv_nd(dims, model_channels, out_channels, 3, padding=1)),
         )
 
-    def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
-        self.input_blocks.apply(convert_module_to_f16)
-        self.middle_block.apply(convert_module_to_f16)
-        self.output_blocks.apply(convert_module_to_f16)
-
-    def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
-        self.input_blocks.apply(convert_module_to_f32)
-        self.middle_block.apply(convert_module_to_f32)
-        self.output_blocks.apply(convert_module_to_f32)
 
     @property
     def inner_dtype(self):
@@ -482,9 +476,11 @@ class UNetModel(nn.Module):
         h = x.type(self.inner_dtype)
         for module in self.input_blocks:
             h = module(h, emb)
+            logger.debug(f"the h size in output block: {h.size()} -- from unet-Unetmodel-forward")
             hs.append(h)
         h = self.middle_block(h, emb)
         for module in self.output_blocks:
+            logger.debug(f"the h size in output block: {h.size()} and the hs is {len(hs)} -- from unet-Unetmodel-forward")
             cat_in = th.cat([h, hs.pop()], dim=1)
             h = module(cat_in, emb)
         h = h.type(x.dtype)

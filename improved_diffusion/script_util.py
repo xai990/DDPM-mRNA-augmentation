@@ -5,6 +5,11 @@ from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import SuperResModel, UNetModel
 
+from sklearn.datasets import make_s_curve 
+import matplotlib.pyplot as plt
+import torch
+from . import logger 
+
 NUM_CLASSES = 1000
 
 
@@ -294,3 +299,22 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError("boolean value expected")
+
+
+
+def s_curve_configure():
+    # s curve data 
+    s_curve,_ = make_s_curve(10**4,noise=0.1)
+    s_curve = s_curve[:,[0,2]]/10.0
+    data = s_curve.T 
+    fig, ax = plt.subplots()
+    ax.scatter(*data, color = 'blue', edgecolor='white')
+    ax.axis('off')
+    fig.savefig('results/input.png')
+    plt.close()
+    dataset = torch.Tensor(s_curve).float()
+    sample= dataset.size()[0]
+    logger.log(f"sampel is:{sample}")
+    dataset= dataset.view(sample, 1, -1)
+    #logger.log(f"dataset size is:{dataset[0]}")
+    return dataset
