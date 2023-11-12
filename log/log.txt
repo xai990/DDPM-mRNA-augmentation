@@ -1,0 +1,13 @@
+2023-11-10 15:26:14,993 - INFO - **********************************
+INFO - log configure
+INFO - sampel is:10000
+INFO - The training loss is:0.6784863471984863 at 0 epoch
+INFO - The training loss is:1.232654094696045 at 100 epoch
+INFO - The training loss is:0.8407367467880249 at 200 epoch
+INFO - The training loss is:1.3241089582443237 at 300 epoch
+INFO - The training loss is:0.6726086139678955 at 400 epoch
+INFO - The training loss is:1.1317553520202637 at 500 epoch
+INFO - The training loss is:0.8618149161338806 at 600 epoch
+INFO - The training loss is:1.129988670349121 at 700 epoch
+INFO - The training loss is:1.0255930423736572 at 800 epoch
+INFO - The training loss is:0.9043557643890381 at 900 epoch
