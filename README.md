@@ -22,4 +22,4 @@ python scripts/main.py
 
 ## Forward process 
 The forward process adds noise to the data (S curve data) step by step. 
-<img src="results/forward.png" height="240" />
+<img src="results/forward.png"/>
