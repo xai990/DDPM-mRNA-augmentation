@@ -9,6 +9,9 @@ from sklearn.datasets import make_s_curve
 import matplotlib.pyplot as plt
 import torch
 from . import logger 
+import os 
+
+
 
 NUM_CLASSES = 1000
 
@@ -18,7 +21,7 @@ def model_and_diffusion_defaults():
     Defaults for image training.
     """
     return dict(
-        image_size=64,
+        feature_size=64, # origin is image_size
         num_channels=128,
         num_res_blocks=2,
         num_heads=4,
@@ -37,11 +40,12 @@ def model_and_diffusion_defaults():
         rescale_learned_sigmas=True,
         use_checkpoint=False,
         use_scale_shift_norm=True,
+        dims=2,
     )
 
 
 def create_model_and_diffusion(
-    image_size,
+    feature_size,
     class_cond,
     learn_sigma,
     sigma_small,
@@ -60,9 +64,10 @@ def create_model_and_diffusion(
     rescale_learned_sigmas,
     use_checkpoint,
     use_scale_shift_norm,
+    dims,
 ):
     model = create_model(
-        image_size,
+        feature_size,
         num_channels,
         num_res_blocks,
         learn_sigma=learn_sigma,
@@ -73,6 +78,8 @@ def create_model_and_diffusion(
         num_heads_upsample=num_heads_upsample,
         use_scale_shift_norm=use_scale_shift_norm,
         dropout=dropout,
+        dims = dims,
+        
     )
     diffusion = create_gaussian_diffusion(
         steps=diffusion_steps,
@@ -89,7 +96,7 @@ def create_model_and_diffusion(
 
 
 def create_model(
-    image_size,
+    feature_size,
     num_channels,
     num_res_blocks,
     learn_sigma,
@@ -100,33 +107,35 @@ def create_model(
     num_heads_upsample,
     use_scale_shift_norm,
     dropout,
+    dims,
 ):
-    if image_size == 256:
-        channel_mult = (1, 1, 2, 2, 4, 4)
-    elif image_size == 64:
-        channel_mult = (1, 2, 3, 4)
-    elif image_size == 32:
-        channel_mult = (1, 2, 2, 2)
-    else:
-        raise ValueError(f"unsupported image size: {image_size}")
+    # if feature_size == 256:
+    #     channel_mult = (1, 1, 2, 2, 4, 4)
+    # elif feature_size == 64:
+    #     channel_mult = (1, 2, 3, 4)
+    # elif feature_size == 32:
+    #     channel_mult = (1, 2, 2, 2)
+    # else:
+    #     raise ValueError(f"unsupported image size: {feature_size}")
 
     attention_ds = []
     for res in attention_resolutions.split(","):
-        attention_ds.append(image_size // int(res))
+        attention_ds.append(feature_size // int(res))
 
     return UNetModel(
-        in_channels=3,
+        in_channels=1,
         model_channels=num_channels,
-        out_channels=(3 if not learn_sigma else 6),
+        out_channels=1,
         num_res_blocks=num_res_blocks,
         attention_resolutions=tuple(attention_ds),
         dropout=dropout,
-        channel_mult=channel_mult,
+        #channel_mult=channel_mult,
         num_classes=(NUM_CLASSES if class_cond else None),
         use_checkpoint=use_checkpoint,
         num_heads=num_heads,
         num_heads_upsample=num_heads_upsample,
         use_scale_shift_norm=use_scale_shift_norm,
+        dims = dims,
     )
 
 
@@ -217,9 +226,9 @@ def sr_create_model(
         attention_ds.append(large_size // int(res))
 
     return SuperResModel(
-        in_channels=3,
+        in_channels=1,
         model_channels=num_channels,
-        out_channels=(3 if not learn_sigma else 6),
+        out_channels=1,
         num_res_blocks=num_res_blocks,
         attention_resolutions=tuple(attention_ds),
         dropout=dropout,
@@ -302,19 +311,39 @@ def str2bool(v):
 
 
 
-def s_curve_configure():
-    # s curve data 
-    s_curve,_ = make_s_curve(10**4,noise=0.1)
-    s_curve = s_curve[:,[0,2]]/10.0
-    data = s_curve.T 
-    fig, ax = plt.subplots()
-    ax.scatter(*data, color = 'blue', edgecolor='white')
-    ax.axis('off')
-    fig.savefig('results/input.png')
-    plt.close()
-    dataset = torch.Tensor(s_curve).float()
-    sample= dataset.size()[0]
-    logger.log(f"sampel is:{sample}")
-    dataset= dataset.view(sample, 1, -1)
-    #logger.log(f"dataset size is:{dataset[0]}")
-    return dataset
+# def s_curve_configure():
+#     # s curve data 
+#     s_curve,_ = make_s_curve(10**4,noise=0.1)
+#     s_curve = s_curve[:,[0,2]]/10.0
+#     data = s_curve.T 
+#     fig, ax = plt.subplots()
+#     ax.scatter(*data, color = 'blue', edgecolor='white')
+#     ax.axis('off')
+#     fig.savefig('results/input.png')
+#     plt.close()
+#     dataset = torch.Tensor(s_curve).float()
+#     sample= dataset.size()[0]
+#     logger.log(f"sampel is:{sample}")
+#     dataset= dataset.view(sample, 1, -1)
+#     #logger.log(f"dataset size is:{dataset[0]}")
+#     return dataset
+
+# def dataprocess_defaults():
+#     """
+#     Defaults for image training.
+#     """
+#     return dict(
+#         genepath="datasets/breast_train_GEM_transpose.txt",
+#         labelpath="datasets/train_labels.txt",
+#         transform = GeneDataTransform(),
+#         scaler = True,   
+#     )
+
+
+
+def zero_grad(model_params):
+    for param in model_params:
+        # Taken from https://pytorch.org/docs/stable/_modules/torch/optim/optimizer.html#Optimizer.add_param_group
+        if param.grad is not None:
+            param.grad.detach_()
+            param.grad.zero_()

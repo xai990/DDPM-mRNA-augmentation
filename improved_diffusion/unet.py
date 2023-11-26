@@ -442,7 +442,8 @@ class UNetModel(nn.Module):
         self.out = nn.Sequential(
             normalization(ch),
             SiLU(),
-            zero_module(conv_nd(dims, model_channels, out_channels, 3, padding=1)),
+            #zero_module(conv_nd(dims, model_channels, out_channels, 3, padding=1)),
+            conv_nd(dims, model_channels, out_channels, 3, padding=1),
         )
 
 
@@ -467,6 +468,7 @@ class UNetModel(nn.Module):
         ), "must specify y if and only if the model is class-conditional"
 
         hs = []
+        logger.debug(f"The timestep is {timesteps} and model_channels is {self.model_channels} -- unet")
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
         if self.num_classes is not None:
@@ -484,6 +486,7 @@ class UNetModel(nn.Module):
             cat_in = th.cat([h, hs.pop()], dim=1)
             h = module(cat_in, emb)
         h = h.type(x.dtype)
+        #logger.log(f"the type of h is {h.dtype} -- unet")
         return self.out(h)
 
     def get_feature_vectors(self, x, timesteps, y=None):

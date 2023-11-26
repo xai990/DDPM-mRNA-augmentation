@@ -13,7 +13,6 @@ import torch as th
 import torch.nn as nn 
 from .nn import mean_flat
 from .losses import normal_kl, discretized_gaussian_log_likelihood
-from .train_util import gather 
 import torch.nn.functional as F
 
 from . import logger 
@@ -202,6 +201,7 @@ class GaussianDiffusion:
         if noise is None:
             noise = th.randn_like(x_start)
         assert noise.shape == x_start.shape
+        logger.debug(f"The device of x_start is: {x_start.device} --gaussian diffusion-q-sample")
         return (
             _extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
             + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
@@ -741,6 +741,8 @@ class GaussianDiffusion:
                 ModelMeanType.START_X: x_start,
                 ModelMeanType.EPSILON: noise,
             }[self.model_mean_type]
+            logger.debug(f"The model_output shape is {model_output.shape} -- gaussian diffusion")
+            logger.debug(f"The x_start shape is {x_start.shape} -- gaussian diffusion")
             assert model_output.shape == target.shape == x_start.shape
             terms["mse"] = mean_flat((target - model_output) ** 2)
             if "vb" in terms:
@@ -838,11 +840,16 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
                             dimension equal to the length of timesteps.
     :return: a tensor of shape [batch_size, 1, ...] where the shape has K dims.
     """
-    if isinstance(arr, np.ndarray):
-        res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
-    res = arr[timesteps]
+    # if isinstance(arr, np.ndarray):
+    #     res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
+    # res = arr[timesteps]
+    # while len(res.shape) < len(broadcast_shape):
+    #     res = res[..., None]
+    # return res.expand(broadcast_shape)
+    res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
+    logger.debug(f"The device of res is:{res.device}")
     return res.expand(broadcast_shape)
 
 
@@ -853,16 +860,23 @@ class DenoiseDiffusion(nn.Module):
     def __init__(self,
                 model: nn.Module,
                 n_steps: int,
-                device:th.device):
+                device:th.device,
+                beta = None,
+                dtype = th.float32,):
         super().__init__()
-        #self.beta = th.linspace(1e-4,0.02,n_steps).to(device)
-        self.beta = th.linspace(1e-5,0.002,n_steps).to(device) # change beta to a smaller value
+        
+            
+        if beta == None:
+            beta = th.linspace(1e-4,0.02,n_steps).to(device=device, dtype=dtype)
+        self.beta = beta
+        #self.beta = th.linspace(1e-5,0.002,n_steps).to(device) # change beta to a smaller value
         self.alpha = 1 - self.beta
         self.alpha_bar = th.cumprod(self.alpha,dim=0)
         self.model = model
         self.sigma2 = self.beta # sigma 2 == beta has the same performance
         self.n_steps = n_steps
-
+        self.device = device
+        logger.debug(f"The type of alpha is: {self.alpha.dtype}")
 
     # def q_xt_x0(self, x0, t):
     #     mean = gather(self.alpha_bar,t) ** 0.5 * x0
@@ -888,13 +902,15 @@ class DenoiseDiffusion(nn.Module):
         return  mean + var ** 0.5 * eps
 
 
-    def p_sample(self, xt:th.Tensor, t:th.Tensor):
+    def p_sample(self, model, xt:th.Tensor, t:th.Tensor):
 
-        alpha_bar = gather(self.alpha_bar, t)
-        alpha = gather(self.alpha, t)
-        beta = gather(self.beta, t)
+        alpha_bar = _extract_into_tensor(self.alpha_bar, t,xt.shape)
+        alpha = _extract_into_tensor(self.alpha, t,xt.shape)
+        beta = _extract_into_tensor(self.beta, t,xt.shape)
         # eps theta
-        eps_theta = self.model(xt,t)
+        logger.debug(f"The size of t is:{t.size()} -- gaussian diffusion-p_sample")
+        logger.debug(f"The device of t is:{t.device} and the device of xt is:{xt.device} -- gaussian diffusion-p_sample")
+        eps_theta = model(xt,t)
         # coeff for eps
         eps_coef = beta / (1-alpha_bar) ** .5
         # mean
@@ -908,15 +924,17 @@ class DenoiseDiffusion(nn.Module):
     def loss(self, x0:th.Tensor, noise:Optional[th.Tensor]=None):
 
         batch_size = x0.shape[0]
-        t = th.randint(0,self.n_steps, (batch_size,), device=x0.device,dtype=th.long)
-        logger.debug(f"The size of t at the loss function is:{t.size()}  -- from gaussian_diffusion" )
+        t = th.randint(0,self.n_steps, (batch_size,), device=x0.device)
+        #logger.debug(f"The size of t at the loss function is:{t.size()}  -- from gaussian_diffusion" )
         # print("t size is:",t.size())
         if noise == None:
             noise = th.randn_like(x0)
 
+        
         xt = self.q_sample(x0, t, eps = noise) # (batch_size, channels, rows, cols)
+        logger.debug(f"The type of xt is:{xt.dtype}")
         #logger.debug(f"The forward xt is: {xt}")
-        logger.debug(f"The size of xt is: {xt.size()} -- from gaussian_diffusion")
+        #logger.debug(f"The size of xt is: {xt.size()} -- from gaussian_diffusion")
         # print("xt size is:", xt.size())
         #t = t.unsqueeze(-1).unsqueeze(-1) # (batch_size, nums) -> (batch_size, channels, rows, nums)
         #logger.debug(f"The size of t is: {t.size()}")
@@ -948,3 +966,13 @@ class DenoiseDiffusion(nn.Module):
 
         plt.savefig("foward.umap.png")
         plt.close()
+
+    
+    def p_sample_loop(self,model,shape):
+        cur_x = th.randn(shape).to(self.device)
+        x_seq = [cur_x]
+        for i in reversed(range(self.n_steps)):
+            t = th.tensor([i]).to(self.device)
+            cur_x = self.p_sample(model, cur_x, t)
+            x_seq.append(cur_x)
+        return x_seq
