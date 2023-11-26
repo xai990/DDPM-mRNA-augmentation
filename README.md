@@ -15,7 +15,14 @@ cd DDPM-mRNA-augmentation
 # create conda environment called "DDPM"
 conda env create -f environment.yml
 
+# install the package
+python setup.py install 
+
 # run DDPM on breast cancer data  -- make sure the scripts are running on a computed node (an interactive job includes at least one gpu)
 python scripts/main.py
 
 ```
+
+## Forward process 
+The forward process adds noise to the data (S curve data) step by step. 
+<img src="results/forward.png"/>
