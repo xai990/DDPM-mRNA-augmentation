@@ -16,6 +16,7 @@ from improved_diffusion.script_util import (
     add_dict_to_argparser,
     create_gaussian_diffusion,
     #dataprocess_defaults,
+    plotumap,
 )
 
 from improved_diffusion.train_util import TrainLoop
@@ -80,6 +81,9 @@ def main():
         **args_to_dict(args, model_and_diffusion_defaults().keys()) # **kwargs is to accept an arbitrary number of keyword arguments
     )
     model.to(dist_util.dev())
+    #logger.log(f"The type of dataset is {(dataset[0])}")
+    #plotumap(diffusion,dataset)
+
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
     # train the model 
     logger.log("traing the model ...")
