@@ -554,7 +554,7 @@ def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
             tempfile.gettempdir(),
             #datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S-%f"),
         )
-    dir = osp.join(datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f"))
+    dir = osp.join(dir,datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f"))
     assert isinstance(dir, str)
     dir = os.path.expanduser(dir)
     os.makedirs(os.path.expanduser(dir), exist_ok=True)
