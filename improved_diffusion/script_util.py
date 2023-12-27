@@ -7,11 +7,12 @@ from .unet import SuperResModel, UNetModel
 
 from sklearn.datasets import make_s_curve 
 import matplotlib.pyplot as plt
-import torch
+import torch as th
 from . import logger 
 import os 
-
-
+import umap.plot
+import numpy as np 
+from scipy.stats import gaussian_kde
 
 NUM_CLASSES = 1000
 
@@ -347,3 +348,64 @@ def zero_grad(model_params):
         if param.grad is not None:
             param.grad.detach_()
             param.grad.zero_()
+
+
+
+def plotforwardumap(diffusion,x0, n_steps = 1000, noise=None, num_shows=20, cols=10):
+        # compute embedding of merge data
+        reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2)
+        dataset = th.from_numpy(x0)
+        logger.log(f"The size of dataset is {dataset.size()} --script_util")
+        # initialize figure
+        rows = num_shows//cols
+
+        #print("The type of row is:",type(rows))
+        fig,axs = plt.subplots(rows,cols,figsize=(28,3))
+        plt.rc('text', color = 'black') # add text to the plot
+        
+        for i in range(num_shows):
+            
+            j = i //cols # plot col index
+            k = i % cols # plot row index
+            # generate q_sample
+            t = th.full((dataset.shape[0],),i*n_steps//num_shows)
+            xt = diffusion.q_sample(dataset,t)
+            #logger.log(f"The type of dataset is {type(xt)} --script_util")
+            # apply umap embedding
+            qi = reducer.fit_transform(xt) # data type: tuple
+            axs[j,k].scatter(qi[:,0],qi[:,1], color='red',edgecolor='white')
+            axs[j,k].set_axis_off()
+            axs[j,k].set_title('$q(\mathbf{x}_{'+str(i*n_steps//num_shows)+'})$')
+
+        plt.savefig("results/forward.umap.png")
+        plt.close()
+
+
+
+
+def plotreverseumap(x0, num_shows=20, cols=10):
+        # compute embedding of merge data
+        reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2)
+        B,_,_ = x0.shape
+        dataset = x0.reshape(B,-1)
+        p = reducer.fit_transform(dataset)
+        fig,axs = plt.subplots()
+        axs.scatter(p[:,0],p[:,1], color='blue',edgecolor='white')
+        axs.set_axis_off()
+        axs.set_title('reversed p')
+        plt.savefig("results/reverse.umap.png")
+        plt.close()
+
+
+def density_plot(data):
+    for i in range(data.shape[0]):
+        kde = gaussian_kde(data[i,:])
+        x_range = np.linspace(min(data[i,:]), max(data[i,:]),100)
+        plt.plot(x_range, kde(x_range))
+    # sns.kdeplot(data)
+    plt.savefig("results/sample.density.png")
+    plt.close()
+    # step 1 : change base on N not on batch 
+    # step 2 : add the original density plot as a comparsion 
+    # step 3 : in the desity plot is similar then label matters
+    # step 4: based on the results from step 3, adjust the model or add the label parameters as for training.

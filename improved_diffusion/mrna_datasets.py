@@ -10,7 +10,7 @@ import numpy as np
 #import torch as th 
 
 def load_data(
-    *, data_dir, batch_size, class_cond=False, deterministic=False
+    *, data_dir, batch_size, class_cond=False, deterministic=False,
 ):
     """
     For a dataset, create a generator over (features, kwargs) pairs.
@@ -42,9 +42,8 @@ def load_data(
                                 all_files[1],
                                 transform= GeneDataTransform(),
                                 scaler=True,
-                                random_selection =GeneRandom(seed=12345),
+                                filter="drop",
     )
-    
     if deterministic:
         loader = DataLoader(
             dataset, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True
@@ -70,7 +69,7 @@ def _list_files_recursively(data_dir):
 
 
 class CustomGeneDataset(Dataset): 
-    def __init__(self, genepath="data.txt", labelpath="label.txt", transform=None, scaler = None, target_transform=None, random_selection = None):
+    def __init__(self, genepath="data.txt", labelpath="label.txt", transform=None, filter = None, scaler = None, target_transform=None, random_selection = None):
         assert os.path.exists(genepath), "gene path: {} does not exist.".format(genepath)
         logger.info(f"reading input data from {os.path.basename(genepath)}") 
         # read the gene expression 
@@ -90,7 +89,7 @@ class CustomGeneDataset(Dataset):
         
         self.transform = transform
         self.target_transform = target_transform
-        
+        self.filter = filter
         self.scaler = scaler 
         self.local_classes = None 
         self.random_selection = random_selection
@@ -102,9 +101,11 @@ class CustomGeneDataset(Dataset):
         
         #gene, label = self.gene[idx], self.label[idx]
         gene = self.gene
+        
+
         out_dict = {}
         if self.transform:
-            gene = self.transform(gene, self.scaler)
+            gene = self.transform(gene, self.scaler, self.filter)
             
         if self.target_transform:
             label = self.target_transform(label)
@@ -115,20 +116,41 @@ class CustomGeneDataset(Dataset):
         return np.array(gene[idx], dtype=np.float32), out_dict
 
 
-
 class GeneDataTransform():
+    """
+    For a dataset, data pre-process.
+
+    :param sample: data array.
+    :param scaler: If True, normalize data sample.
+    :param filter: a function which drops nan values or replace.
+    
+    """    
+    def __call__(self, sample, scaler= None, filter = None):
         
-    def __call__(self, sample, scaler= None):
-        # filter the nan value to min values
-        mask_sample = sample[~np.isnan(sample)]
-        mask_nan = np.amin(mask_sample)
-        sample = np.nan_to_num(sample, nan = mask_nan)
-        
+        logger.debug(f"gene has {sample.shape[1]} genes, {sample.shape[0]} samples before pre-processing  -- mrna")
+        if filter != None:
+            if filter == "replace": 
+                # filter the nan value to min values
+                mask_sample = sample[~np.isnan(sample)]
+                mask_nan = np.amin(mask_sample)
+                sample = np.nan_to_num(sample, nan = mask_nan)
+            elif filter == "drop":
+                # drop the nan value by columns
+                sample = sample[:, ~np.isnan(sample).any(axis=0)]
+                """ reduce genes from 19738 to 12811 """
+            # simple trasformation from log2(n) to log2(n+1)
+            sample = np.log2(np.exp2(sample)+1)
         if scaler:
+            """ MaxAbsScaler -- can be heavily influenced by outliers. """
             mins, maxs = np.amin(sample, axis=0)[0], np.amax(sample, axis=0)[0]        
             scaler_ = np.maximum(np.abs(mins),np.abs(maxs))
             sample = np.divide(sample, scaler_)
+                   
+            """ Min-Max scaler"""
+            # mins, maxs = sample.min(), sample.max()
+            # sample = (sample - mins) / (maxs - mins)
         sample  = sample[:,np.newaxis,:]
+        logger.debug(f"data has {sample.shape[2]} genes, {sample.shape[0]} samples after pre-processing  -- mrna")
         #return th.from_numpy(sample).float()
         return sample
 
@@ -146,3 +168,20 @@ class GeneRandom():
         # random select the gene 
         idx = np.random.randint(0,sample.shape[-1], self.features)       
         return sample[:,:,idx]
+
+
+
+
+def load_sample_data(
+    *, data_dir, class_cond=False,
+    ):
+    if not data_dir:
+        raise ValueError("unspecified data directory")
+    all_files = _list_files_recursively(data_dir)
+    dataset = CustomGeneDataset(all_files[0],
+                                all_files[1],
+                                transform= GeneDataTransform(),
+                                scaler=True,
+                                filter="drop",
+    )
+    return dataset
